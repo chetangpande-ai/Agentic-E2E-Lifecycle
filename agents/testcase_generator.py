@@ -15,7 +15,8 @@ from config.prompts.testcase_generator import (
 from models.requirement import Requirement, RequirementAnalysis
 from models.testcase import TestCase, TestStep
 from utils.helpers import parse_json_from_llm
-from utils.logger import logger
+from utils.logger import logger, log_execution_end, log_error, log_debug_data
+import time
 
 
 class TestCaseGeneratorAgent:
@@ -47,6 +48,7 @@ class TestCaseGeneratorAgent:
             List of TestCase objects.
         """
         logger.info(f"[bold green]Generating test cases for:[/bold green] {requirement.id}")
+        start_time = time.time()
 
         feedback_context = ""
         if feedback:

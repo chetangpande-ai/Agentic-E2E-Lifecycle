@@ -7,7 +7,8 @@ from typing import List, Optional
 from atlassian import Jira
 from models.requirement import Requirement
 from config.settings import get_settings
-from utils.logger import logger
+from utils.logger import logger, log_execution_start, log_execution_end, log_error, log_debug_data
+import time
 
 
 class JiraClient:
@@ -15,6 +16,7 @@ class JiraClient:
 
     def __init__(self):
         settings = get_settings()
+        log_execution_start(logger, "JiraClient.__init__", {"url": settings.jira_url, "project": settings.jira_project_key})
         self.jira = Jira(
             url=settings.jira_url,
             username=settings.jira_username,
@@ -23,6 +25,7 @@ class JiraClient:
         )
         self.project_key = settings.jira_project_key
         self.default_jql = settings.jira_jql_filter
+        logger.info(f"JiraClient initialized for project {self.project_key}")
 
     def fetch_requirements(
         self,

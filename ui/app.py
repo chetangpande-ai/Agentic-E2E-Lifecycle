@@ -11,12 +11,16 @@ import streamlit as st
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from utils.logger import logger, log_execution_start, log_debug_data
 from ui.components.sidebar import render_sidebar
 from ui.components.workflow_tracker import render_workflow_tracker
 from ui.components.requirement_view import render_requirement_view
 from ui.components.testcase_view import render_testcase_view
 from ui.components.script_view import render_script_view
 from ui.components.execution_view import render_execution_view
+
+# Log application startup
+logger.info("🚀 Agentic QE STLC Lifecycle application starting...")
 
 # === Page Configuration ===
 st.set_page_config(

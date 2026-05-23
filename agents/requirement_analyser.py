@@ -14,7 +14,8 @@ from config.prompts.requirement_analyser import (
 )
 from models.requirement import Requirement, RequirementAnalysis
 from utils.helpers import parse_json_from_llm
-from utils.logger import logger
+from utils.logger import logger, log_execution_start, log_execution_end, log_error, log_debug_data
+import time
 
 
 class RequirementAnalyserAgent:
@@ -61,6 +62,7 @@ class RequirementAnalyserAgent:
             HumanMessage(content=user_prompt),
         ]
 
+        start_time = time.time()
         try:
             response = self.llm.invoke(messages)
             analysis_data = parse_json_from_llm(response.content)
@@ -81,10 +83,17 @@ class RequirementAnalyserAgent:
                 summary=analysis_data.get("summary", ""),
             )
 
-            logger.info(f"Analysis complete: Testability={analysis.testability_score}, "
-                        f"Est. Test Cases={analysis.estimated_test_cases_count}")
+            duration = time.time() - start_time
+            log_execution_end(logger, f"RequirementAnalyser({requirement.id})", "SUCCESS", duration)
+            log_debug_data(logger, "RequirementAnalysis", {
+                "req_id": requirement.id,
+                "testability": analysis.testability_score,
+                "test_cases_est": analysis.estimated_test_cases_count,
+                "gaps_count": len(analysis.acceptance_criteria_gaps),
+            })
             return analysis
 
         except Exception as e:
-            logger.error(f"Error analyzing requirement: {e}")
+            duration = time.time() - start_time
+            log_error(logger, f"RequirementAnalyser({requirement.id})", e, {"duration": f"{duration:.2f}s"})
             raise

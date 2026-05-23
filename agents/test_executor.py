@@ -20,7 +20,8 @@ from config.prompts.executor import (
 from models.script import TestScript, GeneratedFile
 from models.execution import ExecutionResult, TestResult, AutoHealAttempt, ExecutionStatus
 from utils.helpers import parse_json_from_llm
-from utils.logger import logger
+from utils.logger import logger, log_execution_start, log_execution_end, log_error, log_debug_data
+import time
 
 
 class TestExecutorAgent:
