@@ -6,8 +6,8 @@
 langchain>=0.3.0
 langchain-core>=0.3.0
 langchain-groq>=0.2.0
-langgraph>=0.2.0
-langgraph-checkpoint-sqlite>=2.0.0
+langgraph>=0.5.0  # Latest LangGraph with durable execution, human-in-the-loop, and streaming
+langgraph-checkpoint-sqlite>=3.0.0  # Compatible with latest langgraph
 
 # --- Vector Store ---
 langchain-chroma>=0.2.0
