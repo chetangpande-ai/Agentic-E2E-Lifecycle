@@ -1,13 +1,13 @@
 """
 Configuration sidebar component.
-Handles Jira connection, GitHub settings, and LLM configuration.
+Reads defaults from session state (pre-populated from .env).
 """
 
 import streamlit as st
 
 
 def render_sidebar():
-    """Render the configuration sidebar."""
+    """Render the configuration sidebar with .env pre-populated values."""
     with st.sidebar:
         # Logo/Brand
         st.markdown("""
@@ -26,111 +26,73 @@ def render_sidebar():
 
         st.divider()
 
-        # === Jira Configuration ===
-        with st.expander("🔗 Jira Configuration", expanded=False):
-            jira_url = st.text_input(
-                "Jira URL",
-                value=st.session_state.get("jira_url", ""),
-                placeholder="https://your-domain.atlassian.net",
-                key="sidebar_jira_url",
-            )
-            jira_username = st.text_input(
-                "Username/Email",
-                value=st.session_state.get("jira_username", ""),
-                key="sidebar_jira_username",
-            )
-            jira_token = st.text_input(
-                "API Token",
-                type="password",
-                value=st.session_state.get("jira_api_token", ""),
-                key="sidebar_jira_token",
-            )
-            jira_project = st.text_input(
-                "Project Key",
-                value=st.session_state.get("jira_project_key", ""),
-                placeholder="PROJ",
-                key="sidebar_jira_project",
-            )
-            jql_filter = st.text_area(
-                "JQL Filter",
-                value=st.session_state.get("jql_filter", 'issuetype = Story AND status = "To Do"'),
-                height=68,
-                key="sidebar_jql",
-            )
+        # Helper to mask sensitive values
+        def mask(val, show=6):
+            if not val:
+                return "Not configured"
+            return val[:show] + "•" * min(len(val) - show, 20)
 
-            if st.button("💾 Save Jira Config", key="save_jira", use_container_width=True):
-                st.session_state.jira_url = jira_url
-                st.session_state.jira_username = jira_username
-                st.session_state.jira_api_token = jira_token
-                st.session_state.jira_project_key = jira_project
-                st.session_state.jql_filter = jql_filter
-                st.success("Jira config saved!")
+        # === Connection Status Panel ===
+        st.markdown("### 🔌 Connections")
 
-        # === GitHub Configuration ===
-        with st.expander("🐙 GitHub Configuration", expanded=False):
-            gh_token = st.text_input(
-                "Personal Access Token",
-                type="password",
-                value=st.session_state.get("github_pat", ""),
-                key="sidebar_gh_token",
-            )
-            target_repo = st.text_input(
-                "Target Repository",
-                value=st.session_state.get("github_target_repo", "chetangpande-ai/HdfcBank-Test-Automation"),
-                key="sidebar_target_repo",
-            )
-            ref_repo = st.text_input(
-                "Reference Repository",
-                value=st.session_state.get("github_ref_repo", "chetangpande-ai/PW-Automation-Framework"),
-                key="sidebar_ref_repo",
-            )
+        # Jira
+        jira_url = st.session_state.get("jira_url", "")
+        jira_proj = st.session_state.get("jira_project_key", "")
+        if jira_url:
+            st.markdown(f"🟢 **Jira** — `{jira_proj}`")
+            st.caption(f"{jira_url}")
+        else:
+            st.markdown("🔴 **Jira** — Not configured")
 
-            if st.button("💾 Save GitHub Config", key="save_github", use_container_width=True):
-                st.session_state.github_pat = gh_token
-                st.session_state.github_target_repo = target_repo
-                st.session_state.github_ref_repo = ref_repo
-                st.success("GitHub config saved!")
+        # Groq
+        groq_key = st.session_state.get("groq_api_key", "")
+        groq_model = st.session_state.get("groq_model", "")
+        if groq_key:
+            st.markdown(f"🟢 **LLM** — `{groq_model}`")
+            st.caption(f"Key: {mask(groq_key)}")
+        else:
+            st.markdown("🔴 **LLM** — Not configured")
 
-        # === LLM Configuration ===
-        with st.expander("🤖 LLM Configuration", expanded=False):
-            groq_key = st.text_input(
-                "Groq API Key",
-                type="password",
-                value=st.session_state.get("groq_api_key", ""),
-                key="sidebar_groq_key",
-            )
-            model = st.selectbox(
-                "Model",
-                ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768", "gemma2-9b-it"],
-                index=0,
-                key="sidebar_model",
-            )
-            temperature = st.slider(
-                "Temperature",
-                min_value=0.0,
-                max_value=1.0,
-                value=0.1,
-                step=0.05,
-                key="sidebar_temp",
-            )
+        # GitHub
+        gh_pat = st.session_state.get("github_pat", "")
+        gh_target = st.session_state.get("github_target_repo", "")
+        gh_ref = st.session_state.get("github_ref_repo", "")
+        if gh_pat:
+            st.markdown(f"🟢 **GitHub**")
+            st.caption(f"Target: {gh_target}")
+            st.caption(f"Ref: {gh_ref}")
+        else:
+            st.markdown("🔴 **GitHub** — Not configured")
 
-            if st.button("💾 Save LLM Config", key="save_llm", use_container_width=True):
-                st.session_state.groq_api_key = groq_key
-                st.session_state.groq_model = model
-                st.session_state.groq_temperature = temperature
-                st.success("LLM config saved!")
+        # Target App
+        target_url = st.session_state.get("target_app_url", "")
+        if target_url:
+            st.markdown(f"🟢 **Target App**")
+            st.caption(f"{target_url}")
+        else:
+            st.markdown("⚪ **Target App** — Not set")
 
-        # === Target App ===
-        with st.expander("🌐 Target Application", expanded=False):
-            app_url = st.text_input(
-                "Application URL",
-                value=st.session_state.get("target_app_url", ""),
-                placeholder="https://your-app.com",
-                key="sidebar_app_url",
-            )
-            if st.button("💾 Save", key="save_app", use_container_width=True):
-                st.session_state.target_app_url = app_url
-                st.success("Target app config saved!")
+        st.divider()
+
+        # === Detailed Config (Read-only expandable) ===
+        with st.expander("📋 Configuration Details", expanded=False):
+            st.markdown("**Jira**")
+            st.text(f"URL: {jira_url or 'N/A'}")
+            st.text(f"User: {st.session_state.get('jira_username', 'N/A')}")
+            st.text(f"Project: {jira_proj or 'N/A'}")
+            st.text(f"JQL: {st.session_state.get('jql_filter', 'N/A')}")
+
+            st.markdown("**LLM**")
+            st.text(f"Model: {groq_model or 'N/A'}")
+
+            st.markdown("**GitHub**")
+            st.text(f"Target: {gh_target or 'N/A'}")
+            st.text(f"Reference: {gh_ref or 'N/A'}")
+
+            st.markdown("**Target App**")
+            st.text(f"URL: {target_url or 'N/A'}")
+
+            st.info("💡 Edit `.env` file to change configuration")
 
         st.divider()
 
@@ -138,17 +100,16 @@ def render_sidebar():
         st.markdown("### ⚡ Quick Actions")
 
         if st.button("🔄 Reset Workflow", key="reset_workflow", use_container_width=True):
-            for key in ["workflow_step", "raw_requirements", "analyzed_requirements",
-                        "generated_testcases", "generated_scripts", "execution_results",
-                        "thread_id"]:
+            keys_to_reset = [
+                "workflow_step", "raw_requirements", "analyzed_requirements",
+                "generated_testcases", "generated_scripts", "execution_results",
+                "thread_id", "script_dependencies", "script_setup_commands",
+                "pr_url", "rejected_step", "messages",
+            ]
+            for key in keys_to_reset:
                 if key in st.session_state:
                     del st.session_state[key]
             st.session_state.workflow_step = 0
+            st.session_state.rejected_step = -1
+            st.session_state.messages = []
             st.rerun()
-
-        # Status indicator
-        st.markdown("---")
-        status_color = "🟢" if st.session_state.get("groq_api_key") else "🔴"
-        st.markdown(f"{status_color} **LLM**: {'Connected' if st.session_state.get('groq_api_key') else 'Not configured'}")
-        jira_status = "🟢" if st.session_state.get("jira_url") else "🔴"
-        st.markdown(f"{jira_status} **Jira**: {'Connected' if st.session_state.get('jira_url') else 'Not configured'}")

@@ -52,6 +52,36 @@ for key, val in defaults.items():
     if key not in st.session_state:
         st.session_state[key] = val
 
+# === Load .env on first run and pre-populate session state ===
+from dotenv import load_dotenv
+env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+load_dotenv(env_path, override=True)
+
+if "env_loaded" not in st.session_state:
+    # Map .env vars to session state keys (pre-populate sidebar)
+    env_to_session = {
+        "GROQ_API_KEY": "groq_api_key",
+        "GROQ_MODEL": "groq_model",
+        "GROQ_TEMPERATURE": "groq_temperature",
+        "JIRA_URL": "jira_url",
+        "JIRA_USERNAME": "jira_username",
+        "JIRA_API_TOKEN": "jira_api_token",
+        "JIRA_PROJECT_KEY": "jira_project_key",
+        "JIRA_JQL_FILTER": "jql_filter",
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "github_pat",
+        "GITHUB_TARGET_REPO": "github_target_repo",
+        "GITHUB_REFERENCE_REPO": "github_ref_repo",
+        "TARGET_APP_URL": "target_app_url",
+    }
+    for env_key, session_key in env_to_session.items():
+        val = os.environ.get(env_key, "")
+        if val:
+            if session_key == "groq_temperature":
+                st.session_state[session_key] = float(val)
+            else:
+                st.session_state[session_key] = val
+    st.session_state.env_loaded = True
+
 
 def update_env_from_session():
     """Update environment variables from session state config."""
@@ -110,8 +140,8 @@ if st.session_state.workflow_step == 0:
     st.markdown("## 📥 Step 1: Fetch Requirements from Jira")
 
     if not st.session_state.get("jira_url"):
-        st.warning("⚠️ Configure Jira connection in the sidebar first.")
-    
+        st.warning("⚠️ Jira URL not found. Please configure in `.env` file.")
+
     col1, col2 = st.columns([3, 1])
     with col1:
         req_ids = st.text_input(
@@ -125,7 +155,9 @@ if st.session_state.workflow_step == 0:
 
     if fetch_btn:
         if not st.session_state.get("groq_api_key"):
-            st.error("Please configure Groq API key in the sidebar.")
+            st.error("Groq API key not found. Please set GROQ_API_KEY in `.env`.")
+        elif not st.session_state.get("jira_url"):
+            st.error("Jira not configured. Please set JIRA_URL in `.env`.")
         else:
             with st.spinner("Fetching requirements from Jira & analyzing..."):
                 try:
