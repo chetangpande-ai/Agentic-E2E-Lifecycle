@@ -15,6 +15,9 @@ chromadb>=0.5.0
 langchain-huggingface>=0.1.0
 sentence-transformers>=3.0.0
 
+# --- Computer Vision (required by transformers optional models) ---
+torchvision>=0.18.0
+
 # --- MCP Integration ---
 langchain-mcp-adapters>=0.1.0
 mcp>=1.0.0

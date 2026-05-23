@@ -10,6 +10,8 @@ print("=" * 60)
 print("CONNECTIVITY TEST")
 print("=" * 60)
 
+failures = []
+
 # 1. Test Groq LLM
 print("\n[1/3] Testing Groq LLM...")
 try:
@@ -25,6 +27,7 @@ try:
     print(f"  Response: {resp.content[:80]}")
 except Exception as e:
     print(f"  FAIL - {str(e)[:200]}")
+    failures.append("Groq LLM")
 
 # 2. Test Jira
 print("\n[2/3] Testing Jira...")
@@ -45,6 +48,7 @@ try:
         print(f"    {issue['key']}: {issue['fields']['summary']}")
 except Exception as e:
     print(f"  FAIL - {str(e)[:300]}")
+    failures.append("Jira")
 
 # 3. Test GitHub
 print("\n[3/3] Testing GitHub...")
@@ -58,13 +62,23 @@ try:
     r1 = httpx.get(f"https://api.github.com/repos/{target}", headers=headers)
     status1 = "OK" if r1.status_code == 200 else f"FAIL ({r1.status_code})"
     print(f"  Target Repo: {target} - {status1}")
+    if r1.status_code != 200:
+        failures.append("GitHub target repo")
 
     r2 = httpx.get(f"https://api.github.com/repos/{ref}", headers=headers)
     status2 = "OK" if r2.status_code == 200 else f"FAIL ({r2.status_code})"
     print(f"  Reference Repo: {ref} - {status2}")
+    if r2.status_code != 200:
+        failures.append("GitHub reference repo")
 except Exception as e:
     print(f"  FAIL - {str(e)[:200]}")
+    failures.append("GitHub")
 
 print("\n" + "=" * 60)
-print("All connectivity tests complete.")
+if failures:
+    print(f"Connectivity test failed: {', '.join(failures)}")
+else:
+    print("All connectivity tests passed.")
 print("=" * 60)
+
+sys.exit(1 if failures else 0)

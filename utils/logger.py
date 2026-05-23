@@ -12,6 +12,10 @@ from rich.logging import RichHandler
 from rich.console import Console
 from config.settings import get_settings
 
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, "reconfigure"):
+        stream.reconfigure(encoding="utf-8", errors="replace")
+
 console = Console()
 
 # Create logs directory if it doesn't exist

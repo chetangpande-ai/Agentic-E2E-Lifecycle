@@ -95,12 +95,19 @@ def hitl_requirement_review(state: AgenticQEState) -> Dict[str, Any]:
     # Decision comes back from the UI via Command(resume=...)
     action = decision.get("action", "reject")
     feedback = decision.get("feedback", "")
+    
+    # Increment regeneration attempts if user requests regenerate
+    regen_attempts = state.requirement_regeneration_attempts
+    if action == "regenerate":
+        regen_attempts += 1
+        logger.info(f"Requirement regeneration requested. Attempt {regen_attempts}")
 
     return {
         "requirement_hitl_status": action,
         "requirement_feedback": feedback,
+        "requirement_regeneration_attempts": regen_attempts,
         "current_workflow": "hitl_requirement_decision",
-        "messages": state.messages + [f"HITL Requirement Review: {action}"],
+        "messages": state.messages + [f"HITL Requirement Review: {action} (attempt {regen_attempts})"],
     }
 
 
@@ -119,12 +126,20 @@ def generate_testcases(state: AgenticQEState) -> Dict[str, Any]:
         requirement = Requirement(**item["requirement"])
         analysis = RequirementAnalysis(**item["analysis"])
 
-        test_cases = agent.generate(
-            requirement=requirement,
-            analysis=analysis,
-            feedback=state.testcase_feedback,
-        )
-        all_test_cases.extend([tc.model_dump() for tc in test_cases])
+        try:
+            test_cases = agent.generate(
+                requirement=requirement,
+                analysis=analysis,
+                feedback=state.testcase_feedback,
+            )
+            all_test_cases.extend([tc.model_dump() for tc in test_cases])
+        except Exception as e:
+            logger.error(f"Failed to generate test cases for {requirement.id}: {e}")
+            # Continue with other requirements but log the error
+            return {
+                "error": f"Test case generation failed: {str(e)}",
+                "messages": state.messages + [f"❌ Test case generation error: {str(e)}"],
+            }
 
     return {
         "generated_testcases": all_test_cases,
@@ -146,12 +161,19 @@ def hitl_testcase_review(state: AgenticQEState) -> Dict[str, Any]:
 
     action = decision.get("action", "reject")
     feedback = decision.get("feedback", "")
+    
+    # Increment regeneration attempts if user requests regenerate
+    regen_attempts = state.testcase_regeneration_attempts
+    if action == "regenerate":
+        regen_attempts += 1
+        logger.info(f"Testcase regeneration requested. Attempt {regen_attempts}")
 
     return {
         "testcase_hitl_status": action,
         "testcase_feedback": feedback,
+        "testcase_regeneration_attempts": regen_attempts,
         "current_workflow": "hitl_testcase_decision",
-        "messages": state.messages + [f"HITL Test Case Review: {action}"],
+        "messages": state.messages + [f"HITL Test Case Review: {action} (attempt {regen_attempts})"],
     }
 
 
@@ -235,12 +257,19 @@ def hitl_script_review(state: AgenticQEState) -> Dict[str, Any]:
 
     action = decision.get("action", "reject")
     feedback = decision.get("feedback", "")
+    
+    # Increment regeneration attempts if user requests regenerate
+    regen_attempts = state.script_regeneration_attempts
+    if action == "regenerate":
+        regen_attempts += 1
+        logger.info(f"Script regeneration requested. Attempt {regen_attempts}")
 
     return {
         "script_hitl_status": action,
         "script_feedback": feedback,
+        "script_regeneration_attempts": regen_attempts,
         "current_workflow": "hitl_script_decision",
-        "messages": state.messages + [f"HITL Script Review: {action}"],
+        "messages": state.messages + [f"HITL Script Review: {action} (attempt {regen_attempts})"],
     }
 
 

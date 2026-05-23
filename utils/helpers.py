@@ -11,6 +11,7 @@ def parse_json_from_llm(text: str) -> Dict[str, Any]:
     """
     Extract and parse JSON from LLM response text.
     Handles cases where JSON is wrapped in markdown code blocks.
+    Returns empty dict if parsing fails.
     """
     # Try to find JSON in code blocks first
     json_match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)

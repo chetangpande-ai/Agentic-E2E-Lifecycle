@@ -15,6 +15,13 @@ def route_after_requirement_hitl(state: AgenticQEState) -> str:
     if status == "approved":
         return "generate_testcases"
     elif status == "regenerate":
+        # Check max regeneration attempts (3 tries max)
+        max_attempts = 3
+        if state.requirement_regeneration_attempts >= max_attempts:
+            logger.warning(f"⚠️  Max requirement regeneration attempts ({max_attempts}) reached. Rejecting and moving to workflow_end.")
+            return "workflow_end"
+        
+        logger.info(f"Regenerating requirements (attempt {state.requirement_regeneration_attempts + 1}/{max_attempts})")
         return "analyze_requirements"
     else:  # rejected
         return "workflow_end"
@@ -28,6 +35,13 @@ def route_after_testcase_hitl(state: AgenticQEState) -> str:
     if status == "approved":
         return "analyze_repository"
     elif status == "regenerate":
+        # Check max regeneration attempts (3 tries max)
+        max_attempts = 3
+        if state.testcase_regeneration_attempts >= max_attempts:
+            logger.warning(f"⚠️  Max testcase regeneration attempts ({max_attempts}) reached. Rejecting and moving to workflow_end.")
+            return "workflow_end"
+        
+        logger.info(f"Regenerating testcases (attempt {state.testcase_regeneration_attempts + 1}/{max_attempts})")
         return "generate_testcases"
     else:
         return "workflow_end"
@@ -41,6 +55,13 @@ def route_after_script_hitl(state: AgenticQEState) -> str:
     if status == "approved":
         return "execute_tests"
     elif status == "regenerate":
+        # Check max regeneration attempts (3 tries max)
+        max_attempts = 3
+        if state.script_regeneration_attempts >= max_attempts:
+            logger.warning(f"⚠️  Max script regeneration attempts ({max_attempts}) reached. Rejecting and moving to workflow_end.")
+            return "workflow_end"
+        
+        logger.info(f"Regenerating scripts (attempt {state.script_regeneration_attempts + 1}/{max_attempts})")
         return "generate_scripts"
     else:
         return "workflow_end"

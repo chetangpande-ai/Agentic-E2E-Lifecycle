@@ -24,11 +24,13 @@ class AgenticQEState(BaseModel):
     analyzed_requirements: List[Dict[str, Any]] = Field(default_factory=list, description="Analyzed requirements")
     requirement_hitl_status: str = Field(default="pending", description="HITL decision: pending|approved|rejected|regenerate")
     requirement_feedback: str = Field(default="", description="HITL feedback text")
+    requirement_regeneration_attempts: int = Field(default=0, description="Number of requirement regeneration attempts")
 
     # === Workflow 2: Test Case Generation ===
     generated_testcases: List[Dict[str, Any]] = Field(default_factory=list, description="Generated test cases")
     testcase_hitl_status: str = Field(default="pending", description="HITL decision")
     testcase_feedback: str = Field(default="", description="HITL feedback text")
+    testcase_regeneration_attempts: int = Field(default=0, description="Number of testcase regeneration attempts")
 
     # === Workflow 3: Script Generation ===
     repo_analysis: Dict[str, Any] = Field(default_factory=dict, description="Repository analysis results")
@@ -38,6 +40,7 @@ class AgenticQEState(BaseModel):
     script_setup_commands: List[str] = Field(default_factory=list, description="Setup commands")
     script_hitl_status: str = Field(default="pending", description="HITL decision")
     script_feedback: str = Field(default="", description="HITL feedback text")
+    script_regeneration_attempts: int = Field(default=0, description="Number of script regeneration attempts")
 
     # === Workflow 4: Execution ===
     execution_results: List[Dict[str, Any]] = Field(default_factory=list, description="Test execution results")
