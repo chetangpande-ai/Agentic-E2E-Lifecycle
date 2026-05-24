@@ -11,6 +11,10 @@ __pycache__/
 dist/
 build/
 
+# Node
+node_modules/
+ui/react/dist/
+
 # ChromaDB local storage
 chroma_db/
 

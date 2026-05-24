@@ -71,14 +71,14 @@ class TestCaseGeneratorAgent:
 
         try:
             response = self.llm.invoke(messages)
-            log_debug_data("LLM Response (Raw)", response.content[:500])  # Log first 500 chars
+            log_debug_data(logger, "LLM Response (Raw)", response.content[:500])  # Log first 500 chars
             
             result = parse_json_from_llm(response.content)
-            log_debug_data("Parsed JSON", str(result)[:500])  # Log parse result
+            log_debug_data(logger, "Parsed JSON", str(result)[:500])  # Log parse result
             
             if not result:
                 logger.warning("⚠️  JSON parsing returned empty result. Raw response may not be valid JSON.")
-                log_debug_data("Full LLM Response for Failed Parse", response.content)
+                log_debug_data(logger, "Full LLM Response for Failed Parse", response.content)
                 raise ValueError("Failed to parse LLM response as JSON")
 
             test_cases = []
@@ -86,7 +86,7 @@ class TestCaseGeneratorAgent:
 
             if not raw_cases:
                 logger.warning(f"⚠️  LLM returned 0 test cases. Response had: {list(result.keys())}")
-                log_debug_data("Empty test_cases Response", json.dumps(result, indent=2))
+                log_debug_data(logger, "Empty test_cases Response", json.dumps(result, indent=2))
                 raise ValueError("LLM returned empty test_cases array - check prompt and response format")
 
             for i, tc_data in enumerate(raw_cases):
@@ -120,8 +120,7 @@ class TestCaseGeneratorAgent:
 
         except Exception as e:
             logger.error(f"❌ Error generating test cases: {str(e)}")
-            log_error(f"TestCase Generation Failed", {
+            log_error(logger, f"TestCaseGenerator({requirement.id})", e, {
                 "requirement_id": requirement.id,
-                "error": str(e),
             })
             raise

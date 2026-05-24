@@ -23,7 +23,7 @@ Jira/ADO → Requirement Analyser → [HITL] → Test Case Generator → [HITL] 
 - **Orchestration**: LangGraph with HITL interrupts
 - **Vector Store**: ChromaDB + HuggingFace embeddings (local, free)
 - **Test Framework**: Playwright-BDD (Node.js, TypeScript)
-- **UI**: Streamlit (dark theme, glassmorphism)
+- **UI**: React + FastAPI
 - **Integrations**: Jira API, Playwright MCP, GitHub MCP
 
 ## 🚀 Quick Start
@@ -62,10 +62,16 @@ copy .env.example .env
 ### 4. Run
 
 ```bash
-streamlit run ui/app.py
+# Terminal 1: API
+uvicorn ui.api:app --reload --host 127.0.0.1 --port 8000
+
+# Terminal 2: React UI
+cd ui/react
+npm install
+npm run dev
 ```
 
-Open http://localhost:8501 in your browser.
+Open http://127.0.0.1:5173 in your browser.
 
 ## 📁 Project Structure
 
@@ -75,7 +81,7 @@ Open http://localhost:8501 in your browser.
 ├── graph/               # LangGraph workflow engine
 ├── integrations/        # Jira, Playwright MCP, GitHub MCP
 ├── models/              # Pydantic data models
-├── ui/                  # Streamlit dashboard
+├── ui/                  # FastAPI API and React dashboard
 ├── vectorstore/         # ChromaDB + embeddings
 └── utils/               # Logger and helpers
 ```
