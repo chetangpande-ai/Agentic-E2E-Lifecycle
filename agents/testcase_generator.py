@@ -91,13 +91,28 @@ class TestCaseGeneratorAgent:
 
             for i, tc_data in enumerate(raw_cases):
                 steps = []
-                for step_data in tc_data.get("steps", []):
+                for step_index, step_data in enumerate(tc_data.get("steps", [])):
+                    input_data = step_data.get("input_data", "")
+                    if not isinstance(input_data, str):
+                        input_data = json.dumps(input_data, ensure_ascii=False)
+
                     steps.append(TestStep(
-                        step_number=step_data.get("step_number", i + 1),
+                        step_number=step_data.get("step_number", step_index + 1),
                         action=step_data.get("action", ""),
-                        input_data=step_data.get("input_data", ""),
+                        input_data=input_data,
                         expected_result=step_data.get("expected_result", ""),
                     ))
+
+                test_data = {
+                    str(key): value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+                    for key, value in tc_data.get("test_data", {}).items()
+                }
+                test_type = tc_data.get("test_type", "UI")
+                if test_type not in {"UI", "API", "DB", "Kafka", "MQ"}:
+                    test_type = "UI"
+                priority = tc_data.get("priority", "P2")
+                if priority not in {"P0", "P1", "P2", "P3"}:
+                    priority = "P2"
 
                 test_case = TestCase(
                     id=tc_data.get("id", f"TC_{i+1:03d}"),
@@ -105,10 +120,10 @@ class TestCaseGeneratorAgent:
                     title=tc_data.get("title", ""),
                     description=tc_data.get("description", ""),
                     preconditions=tc_data.get("preconditions", []),
-                    test_type=tc_data.get("test_type", "UI"),
-                    priority=tc_data.get("priority", "P2"),
+                    test_type=test_type,
+                    priority=priority,
                     steps=steps,
-                    test_data=tc_data.get("test_data", {}),
+                    test_data=test_data,
                     expected_result=tc_data.get("expected_result", ""),
                     tags=tc_data.get("tags", []),
                 )

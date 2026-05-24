@@ -11,6 +11,8 @@ For each requirement, generate test cases covering:
 - **Boundary cases**: Edge values, limits, transitions
 - **Integration scenarios**: Cross-component interactions
 
+Generate 6 to 8 highest-value test cases unless the human feedback explicitly asks for more.
+
 Each test case MUST include:
 1. Unique test case ID (TC_XXX format)
 2. Title (concise, descriptive)
@@ -23,7 +25,8 @@ Each test case MUST include:
 9. Test Type (UI, API, DB, Kafka, MQ)
 10. Tags/Labels
 
-Always generate thorough, executable test cases. Format output as structured JSON."""
+Always generate thorough, executable test cases. Format output as strict JSON only.
+Do not use JavaScript expressions, comments, markdown outside the JSON, or shorthand values such as "A".repeat(50)."""
 
 TESTCASE_GENERATION_USER_PROMPT = """Generate detailed test cases for the following analyzed requirement:
 
@@ -50,7 +53,7 @@ Generate test cases in the following JSON format:
                 {{
                     "step_number": 1,
                     "action": "...",
-                    "input_data": "...",
+                    "input_data": "Plain string only. For structured data, serialize it as compact JSON text.",
                     "expected_result": "..."
                 }}
             ],
