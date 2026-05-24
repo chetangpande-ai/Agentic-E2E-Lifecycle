@@ -16,7 +16,36 @@ def _repair_json_text(text: str) -> str:
         count = int(match.group(2))
         return json.dumps(value * count)
 
-    return repeat_pattern.sub(expand_repeat, text)
+    text = repeat_pattern.sub(expand_repeat, text)
+
+    repaired = []
+    in_string = False
+    escape = False
+    for char in text:
+        if in_string:
+            if escape:
+                repaired.append(char)
+                escape = False
+            elif char == "\\":
+                repaired.append(char)
+                escape = True
+            elif char == '"':
+                repaired.append(char)
+                in_string = False
+            elif char == "\n":
+                repaired.append("\\n")
+            elif char == "\r":
+                repaired.append("\\r")
+            elif char == "\t":
+                repaired.append("\\t")
+            else:
+                repaired.append(char)
+        else:
+            repaired.append(char)
+            if char == '"':
+                in_string = True
+
+    return "".join(repaired)
 
 
 def _parse_partial_test_cases(text: str) -> Dict[str, Any]:

@@ -27,3 +27,9 @@ def test_parse_json_recovers_complete_cases_from_truncated_array():
     )
 
     assert [case["id"] for case in payload["test_cases"]] == ["TC_001", "TC_002"]
+
+
+def test_parse_json_escapes_multiline_string_content():
+    payload = parse_json_from_llm('{"files": [{"path": "test.ts", "content": "line 1\nline 2"}]}')
+
+    assert payload["files"][0]["content"] == "line 1\nline 2"
