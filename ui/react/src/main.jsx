@@ -367,7 +367,7 @@ function Execution({ results, prUrl, onRun, onCommit, busy }) {
   if (!results.length) {
     return (
       <Panel title="Test Execution">
-        <p className="muted">Approved scripts are ready to execute with auto-heal.</p>
+        <p className="muted">Approved scripts are ready for repository validation.</p>
         <button className="button primary" disabled={busy} onClick={onRun}>
           <Play size={16} />
           Execute Tests
@@ -400,7 +400,7 @@ function Execution({ results, prUrl, onRun, onCommit, busy }) {
         </details>
       ))}
       {result.logs && <pre className="code"><code>{result.logs}</code></pre>}
-      {!prUrl && (
+      {!prUrl && result.status === "PASS" && (
         <button className="button primary" disabled={busy} onClick={onCommit}>
           <GitPullRequest size={16} />
           Commit to GitHub and Create PR
@@ -410,9 +410,35 @@ function Execution({ results, prUrl, onRun, onCommit, busy }) {
   );
 }
 
+function LatestLog({ log, onRefresh, busy }) {
+  const updatedAt = log?.updated_at ? new Date(log.updated_at * 1000).toLocaleString() : "";
+  return (
+    <Panel title="Latest Log">
+      <div className="log-toolbar">
+        <div>
+          <strong>{log?.name || "No log file found"}</strong>
+          {updatedAt && <span>{updatedAt}</span>}
+        </div>
+        <button className="icon-button" disabled={busy} onClick={onRefresh} title="Refresh latest log">
+          <RefreshCw size={16} />
+        </button>
+      </div>
+      {log?.content ? (
+        <>
+          {log.truncated && <div className="notice warning">Showing latest log tail.</div>}
+          <pre className="code log-file"><code>{log.content}</code></pre>
+        </>
+      ) : (
+        <p className="muted">No application logs are available yet.</p>
+      )}
+    </Panel>
+  );
+}
+
 function App() {
   const [state, setState] = useState(emptyState);
   const [config, setConfig] = useState(null);
+  const [latestLog, setLatestLog] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -430,10 +456,11 @@ function App() {
   }
 
   useEffect(() => {
-    Promise.all([api("/api/state"), api("/api/config")])
-      .then(([nextState, nextConfig]) => {
+    Promise.all([api("/api/state"), api("/api/config"), api("/api/logs/latest")])
+      .then(([nextState, nextConfig, nextLog]) => {
         setState(nextState);
         setConfig(nextConfig);
+        setLatestLog(nextLog);
       })
       .catch((err) => setError(err.message));
   }, []);
@@ -453,6 +480,11 @@ function App() {
     rejectScripts: () => run("Reject failed", () => api("/api/scripts/reject", { method: "POST" })),
     runExecution: () => run("Execution failed", () => api("/api/execution/run", { method: "POST" })),
     commitPr: () => run("PR creation failed", () => api("/api/commit-pr", { method: "POST" })),
+    refreshLog: () => run("Log refresh failed", async () => {
+      const nextLog = await api("/api/logs/latest");
+      setLatestLog(nextLog);
+      return state;
+    }),
   };
 
   let main;
@@ -497,7 +529,12 @@ function App() {
   } else if (state.workflow_step === 4) {
     main = <Execution results={state.execution_results} prUrl={state.pr_url} busy={busy} onRun={actions.runExecution} onCommit={actions.commitPr} />;
   } else {
-    main = <div className="notice success large">Workflow complete. All tests have been generated, executed, and committed.</div>;
+    main = (
+      <div className="notice success large">
+        Workflow complete. Generated scripts were validated and a GitHub PR was created.
+        {state.pr_url && <a href={state.pr_url}>{state.pr_url}</a>}
+      </div>
+    );
   }
 
   return (
@@ -525,6 +562,7 @@ function App() {
           </details>
         )}
         {main}
+        <LatestLog log={latestLog} busy={busy} onRefresh={actions.refreshLog} />
       </main>
     </div>
   );

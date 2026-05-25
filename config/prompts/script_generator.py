@@ -65,6 +65,9 @@ REPO_ANALYSIS_PROMPT = """Analyze the following test automation repository struc
 **Sample Files**:
 {sample_files}
 
+**Heuristic Analysis**:
+{heuristic_analysis}
+
 Identify and document:
 1. Framework being used (Playwright, Selenium, Cypress, etc.)
 2. Test pattern (BDD, TDD, Page Object Model, etc.)

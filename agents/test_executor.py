@@ -1,239 +1,319 @@
 """
 Test Executor Agent (Workflow 4).
-Executes test scripts, auto-heals failures, commits to GitHub.
+Validates generated scripts against the target repository before PR creation.
 """
 
 import json
 import os
+import re
+import shutil
 import subprocess
 import tempfile
-from typing import List, Optional
-from langchain_groq import ChatGroq
-from langchain_core.messages import SystemMessage, HumanMessage
+from pathlib import Path
+from typing import Dict, List, Set
+
+import git
+
 from config.settings import get_settings
-from config.prompts.executor import (
-    EXECUTOR_SYSTEM_PROMPT,
-    EXECUTOR_RUN_PROMPT,
-    AUTO_HEAL_PROMPT,
-    COMMIT_PR_PROMPT,
-)
-from models.script import TestScript, GeneratedFile
-from models.execution import ExecutionResult, TestResult, AutoHealAttempt, ExecutionStatus
-from utils.helpers import parse_json_from_llm
-from utils.logger import logger, log_execution_start, log_execution_end, log_error, log_debug_data
-import time
+from models.execution import ExecutionResult, ExecutionStatus, TestResult
+from models.script import GeneratedFile, TestScript
+from utils.logger import logger
 
 
 class TestExecutorAgent:
-    """Agent that executes test scripts with auto-heal capabilities."""
+    """Agent that validates generated scripts are merge-ready for the target repo."""
 
-    MAX_HEAL_ATTEMPTS = 3
+    IMPORT_RE = re.compile(
+        r"(?:import\s+(?:[^'\"\n]+\s+from\s+)?|require\()\s*['\"]([^'\"]+)['\"]"
+    )
+    NODE_BUILTINS = {
+        "assert",
+        "buffer",
+        "child_process",
+        "crypto",
+        "events",
+        "fs",
+        "http",
+        "https",
+        "os",
+        "path",
+        "process",
+        "stream",
+        "url",
+        "util",
+    }
 
     def __init__(self):
-        settings = get_settings()
-        self.llm = ChatGroq(
-            model=settings.groq_model,
-            temperature=0.0,  # Zero temp for precise debugging
-            api_key=settings.groq_api_key,
-        )
-        self.settings = settings
+        self.settings = get_settings()
 
     def execute(self, script: TestScript) -> ExecutionResult:
         """
-        Execute test scripts with auto-heal on failure.
-        
-        Args:
-            script: TestScript containing files and setup commands.
-            
-        Returns:
-            ExecutionResult with pass/fail details and auto-heal history.
+        Validate generated scripts against the latest main branch.
+
+        Checks:
+        1. Clone/pull the latest target main branch and apply generated files.
+        2. Confirm generated code has no syntax/compile errors.
+        3. Confirm imported/generated dependencies are declared in package.json.
         """
-        logger.info(f"[bold red]Executing test scripts:[/bold red] {script.id}")
+        logger.info(f"[bold red]Validating generated scripts:[/bold red] {script.id}")
+        workspace = tempfile.mkdtemp(prefix="script_validation_")
+        checks: List[TestResult] = []
+        logs: List[str] = []
 
-        # Set up workspace
-        workspace = tempfile.mkdtemp(prefix="test_execution_")
-        self._write_files(workspace, script.files)
+        try:
+            sync_message = self._sync_main_branch(workspace)
+            self._write_files(workspace, script.files)
+            checks.append(self._pass("main_branch_sync", sync_message))
 
-        # Run setup commands
-        setup_success = self._run_setup(workspace, script.setup_commands)
-        if not setup_success:
+            dependency_errors = self._validate_package_dependencies(workspace, script)
+            if dependency_errors:
+                checks.append(self._fail("package_json_dependencies", "\n".join(dependency_errors)))
+            else:
+                checks.append(self._pass("package_json_dependencies", "Required libraries are declared."))
+
+            compile_errors = self._validate_compile_state(workspace, script.files)
+            if compile_errors:
+                checks.append(self._fail("syntax_compile", compile_errors))
+            else:
+                checks.append(self._pass("syntax_compile", "Generated code is in a compiled state."))
+
+            failed = [check for check in checks if check.status != ExecutionStatus.PASS]
+            status = ExecutionStatus.FAIL if failed else ExecutionStatus.PASS
             return ExecutionResult(
-                id=f"EXEC_{script.id}",
-                script_id=script.id,
-                status=ExecutionStatus.ERROR,
-                logs="Setup failed. Check dependencies and configuration.",
+                status=status,
+                total_tests=len(checks),
+                passed=len(checks) - len(failed),
+                failed=len(failed),
+                results=checks,
+                logs="\n".join(logs + [check.error_message or check.test_name for check in checks]),
             )
+        except Exception as exc:
+            logger.error(f"Executor validation failed: {exc}")
+            return ExecutionResult(
+                status=ExecutionStatus.ERROR,
+                total_tests=len(checks) + 1,
+                passed=sum(1 for check in checks if check.status == ExecutionStatus.PASS),
+                failed=1,
+                results=checks + [self._fail("main_branch_sync", str(exc))],
+                logs=str(exc),
+            )
+        finally:
+            shutil.rmtree(workspace, ignore_errors=True)
 
-        # Execute tests (with auto-heal loop)
-        result = self._execute_with_heal(workspace, script)
-        result.id = f"EXEC_{script.id}"
-        result.script_id = script.id
+    def _sync_main_branch(self, workspace: str) -> str:
+        """Prepare a workspace from the target repo.
 
-        return result
+        Empty repositories do not have a main branch yet, so validation starts
+        from a blank workspace. Non-empty repositories must validate against
+        the configured main branch.
+        """
+        repo_url = f"https://github.com/{self.settings.github_target_repo}.git"
+        base_branch = self.settings.github_target_branch or "main"
+        heads = self._remote_heads(repo_url)
+
+        if not heads:
+            logger.info(f"Target repository is empty; skipping pull from {base_branch}")
+            return f"Target repository is empty; skipped pull from {base_branch}."
+
+        if base_branch not in heads:
+            available = ", ".join(sorted(heads))
+            raise RuntimeError(f"Target repository has branches ({available}) but no {base_branch} branch")
+
+        logger.info(f"Pulling latest {base_branch} from {repo_url}")
+        repo = git.Repo.clone_from(repo_url, workspace, branch=base_branch)
+        repo.git.checkout(base_branch)
+        repo.remotes.origin.pull(base_branch)
+
+        unresolved = list(Path(workspace).rglob("*"))
+        conflict_files = [
+            path for path in unresolved
+            if path.is_file() and not self._is_ignored_path(path, workspace) and self._has_conflict_markers(path)
+        ]
+        if conflict_files:
+            files = ", ".join(str(path.relative_to(workspace)) for path in conflict_files[:10])
+            raise RuntimeError(f"Unresolved merge conflict markers found after pulling main: {files}")
+
+        return f"Pulled latest {base_branch} and applied generated files."
+
+    def _remote_heads(self, repo_url: str) -> Set[str]:
+        """Return branch names published by the remote repository."""
+        result = subprocess.run(
+            ["git", "ls-remote", "--heads", repo_url],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            shell=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Could not inspect target repository branches: {result.stderr.strip()}")
+
+        heads = set()
+        for line in result.stdout.splitlines():
+            parts = line.split()
+            if len(parts) == 2 and parts[1].startswith("refs/heads/"):
+                heads.add(parts[1].removeprefix("refs/heads/"))
+        return heads
 
     def _write_files(self, workspace: str, files: List[GeneratedFile]) -> None:
-        """Write generated files to the workspace directory."""
+        """Write generated files into the cloned repository workspace."""
         for file in files:
-            file_path = os.path.join(workspace, file.path)
-            os.makedirs(os.path.dirname(file_path), exist_ok=True)
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.write(file.content)
+            file_path = Path(workspace, file.path)
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_text(file.content, encoding="utf-8")
             logger.info(f"  Written: {file.path}")
 
-    def _run_setup(self, workspace: str, commands: List[str]) -> bool:
-        """Run setup commands in the workspace."""
-        logger.info("Running setup commands...")
-        for cmd in commands:
+    def _validate_package_dependencies(self, workspace: str, script: TestScript) -> List[str]:
+        package_path = Path(workspace, "package.json")
+        required = self._required_packages(script)
+        if not required:
+            return []
+        if not package_path.exists():
+            return [f"package.json is missing; required packages: {', '.join(sorted(required))}"]
+
+        try:
+            package_json = json.loads(package_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            return [f"package.json is not valid JSON: {exc}"]
+
+        declared = self._declared_packages(package_json)
+        missing = sorted(required - declared)
+        if missing:
+            return [f"Missing package.json dependencies: {', '.join(missing)}"]
+        return []
+
+    def _validate_compile_state(self, workspace: str, files: List[GeneratedFile]) -> str:
+        package_path = Path(workspace, "package.json")
+        package_json: Dict = {}
+        if package_path.exists():
             try:
-                result = subprocess.run(
-                    cmd,
-                    shell=True,
-                    cwd=workspace,
-                    capture_output=True,
-                    text=True,
-                    timeout=120,
-                )
-                if result.returncode != 0:
-                    logger.error(f"Setup command failed: {cmd}\n{result.stderr}")
-                    return False
-                logger.info(f"  ✓ {cmd}")
-            except subprocess.TimeoutExpired:
-                logger.error(f"Setup command timed out: {cmd}")
-                return False
-            except Exception as e:
-                logger.error(f"Setup error: {e}")
-                return False
-        return True
+                package_json = json.loads(package_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as exc:
+                return f"package.json is not valid JSON: {exc}"
 
-    def _execute_with_heal(self, workspace: str, script: TestScript) -> ExecutionResult:
-        """Execute tests with auto-heal loop (max 3 attempts)."""
-        heal_attempts = []
-        current_files = script.files.copy()
+        install_error = self._run_command(["npm", "install", "--ignore-scripts"], workspace, timeout=180)
+        if install_error:
+            return install_error
 
-        for attempt in range(self.MAX_HEAL_ATTEMPTS + 1):
-            # Run the tests
-            exec_result = self._run_tests(workspace)
+        scripts = package_json.get("scripts", {}) if isinstance(package_json, dict) else {}
+        if "build" in scripts:
+            return self._run_command(["npm", "run", "build"], workspace, timeout=180)
 
-            if exec_result.status == ExecutionStatus.PASS:
-                exec_result.auto_heal_attempts = heal_attempts
-                logger.info("[bold green]✓ All tests passed![/bold green]")
-                return exec_result
+        has_ts = any(Path(file.path).suffix in {".ts", ".tsx"} for file in files)
+        if has_ts:
+            if Path(workspace, "tsconfig.json").exists():
+                return self._run_command(["npx", "tsc", "--noEmit"], workspace, timeout=180)
+            ts_files = [file.path for file in files if Path(file.path).suffix in {".ts", ".tsx"}]
+            return self._run_command(
+                [
+                    "npx",
+                    "tsc",
+                    "--noEmit",
+                    "--skipLibCheck",
+                    "--moduleResolution",
+                    "bundler",
+                    "--module",
+                    "esnext",
+                    "--target",
+                    "es2020",
+                    "--resolveJsonModule",
+                    "--esModuleInterop",
+                    *ts_files,
+                ],
+                workspace,
+                timeout=180,
+            )
 
-            if attempt >= self.MAX_HEAL_ATTEMPTS:
-                logger.warning(f"Max auto-heal attempts ({self.MAX_HEAL_ATTEMPTS}) reached")
-                exec_result.auto_heal_attempts = heal_attempts
-                return exec_result
+        js_files = [file.path for file in files if Path(file.path).suffix in {".js", ".jsx", ".mjs", ".cjs"}]
+        for js_file in js_files:
+            error = self._run_command(["node", "--check", js_file], workspace, timeout=60)
+            if error:
+                return error
 
-            # Auto-heal: analyze failures and fix
-            logger.info(f"[bold yellow]Auto-heal attempt {attempt + 1}/{self.MAX_HEAL_ATTEMPTS}[/bold yellow]")
+        for file in files:
+            if Path(file.path).suffix == ".json":
+                try:
+                    json.loads(Path(workspace, file.path).read_text(encoding="utf-8"))
+                except json.JSONDecodeError as exc:
+                    return f"{file.path} is not valid JSON: {exc}"
 
-            for failed_test in exec_result.results:
-                if failed_test.status == ExecutionStatus.FAIL:
-                    heal_result = self._auto_heal(
-                        failed_test=failed_test,
-                        current_files=current_files,
-                        attempt_number=attempt + 1,
-                    )
+        return ""
 
-                    heal_attempts.append(heal_result)
+    def _run_command(self, command: List[str], workspace: str, timeout: int) -> str:
+        executable = shutil.which(command[0])
+        if not executable:
+            return f"Required command not available: {command[0]}"
 
-                    if heal_result.success:
-                        # Write updated files
-                        # The heal result should have updated files embedded
-                        logger.info(f"  Applied fix: {heal_result.fix_description}")
-
-        exec_result = ExecutionResult(
-            status=ExecutionStatus.FAIL,
-            auto_heal_attempts=heal_attempts,
-            logs="Auto-heal exhausted all attempts",
-        )
-        return exec_result
-
-    def _run_tests(self, workspace: str) -> ExecutionResult:
-        """Run the test suite and capture results."""
         try:
             result = subprocess.run(
-                "npx playwright test --reporter=json",
-                shell=True,
+                [executable, *command[1:]],
                 cwd=workspace,
                 capture_output=True,
                 text=True,
-                timeout=300,
+                timeout=timeout,
+                shell=False,
             )
-
-            logs = result.stdout + "\n" + result.stderr
-
-            # Parse results
-            if result.returncode == 0:
-                return ExecutionResult(
-                    status=ExecutionStatus.PASS,
-                    logs=logs,
-                    total_tests=1,
-                    passed=1,
-                )
-            else:
-                return ExecutionResult(
-                    status=ExecutionStatus.FAIL,
-                    logs=logs,
-                    results=[
-                        TestResult(
-                            test_name="Test Suite",
-                            status=ExecutionStatus.FAIL,
-                            error_message=result.stderr[:500] if result.stderr else "Unknown error",
-                            stack_trace=result.stderr,
-                        )
-                    ],
-                )
+        except FileNotFoundError as exc:
+            return f"Required command not available: {exc.filename}"
         except subprocess.TimeoutExpired:
-            return ExecutionResult(
-                status=ExecutionStatus.ERROR,
-                logs="Test execution timed out (300s)",
-            )
-        except Exception as e:
-            return ExecutionResult(
-                status=ExecutionStatus.ERROR,
-                logs=f"Execution error: {str(e)}",
-            )
+            return f"Command timed out: {' '.join(command)}"
 
-    def _auto_heal(
-        self,
-        failed_test: TestResult,
-        current_files: List[GeneratedFile],
-        attempt_number: int,
-    ) -> AutoHealAttempt:
-        """Attempt to auto-heal a failed test."""
-        # Find the relevant file content
-        file_contents = "\n\n".join(
-            f"--- {f.path} ---\n{f.content}" for f in current_files
-        )
+        if result.returncode != 0:
+            output = (result.stdout + "\n" + result.stderr).strip()
+            return f"Command failed: {' '.join(command)}\n{output[-4000:]}"
+        return ""
 
-        prompt = AUTO_HEAL_PROMPT.format(
-            test_name=failed_test.test_name,
-            error_message=failed_test.error_message,
-            stack_trace=failed_test.stack_trace[:2000],
-            original_code=file_contents[:3000],
-            attempt_number=attempt_number,
-        )
+    @classmethod
+    def _required_packages(cls, script: TestScript) -> Set[str]:
+        packages = {cls._package_name(dep) for dep in script.dependencies if dep}
+        for file in script.files:
+            if Path(file.path).suffix not in {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"}:
+                continue
+            for module in cls.IMPORT_RE.findall(file.content):
+                package = cls._package_name(module)
+                if package:
+                    packages.add(package)
+        return {package for package in packages if package}
 
-        messages = [
-            SystemMessage(content=EXECUTOR_SYSTEM_PROMPT),
-            HumanMessage(content=prompt),
-        ]
+    @classmethod
+    def _package_name(cls, module: str) -> str:
+        if not module or module.startswith((".", "/", "#")):
+            return ""
+        if module.startswith("node:"):
+            return ""
+        first = module.split("/")[0]
+        if first in cls.NODE_BUILTINS:
+            return ""
+        if module.startswith("@"):
+            parts = module.split("/")
+            return "/".join(parts[:2]) if len(parts) >= 2 else module
+        return first
 
+    @staticmethod
+    def _declared_packages(package_json: Dict) -> Set[str]:
+        declared: Set[str] = set()
+        for section in ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies"):
+            values = package_json.get(section, {})
+            if isinstance(values, dict):
+                declared.update(values.keys())
+        return declared
+
+    @staticmethod
+    def _has_conflict_markers(path: Path) -> bool:
         try:
-            response = self.llm.invoke(messages)
-            result = parse_json_from_llm(response.content)
+            content = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            return False
+        return "<<<<<<< " in content or ("=======" in content and ">>>>>>> " in content)
 
-            return AutoHealAttempt(
-                attempt_number=attempt_number,
-                root_cause=result.get("root_cause", "Unknown"),
-                fix_description=result.get("fix_description", ""),
-                success=True,
-            )
-        except Exception as e:
-            return AutoHealAttempt(
-                attempt_number=attempt_number,
-                root_cause=f"Auto-heal error: {str(e)}",
-                fix_description="",
-                success=False,
-            )
+    @staticmethod
+    def _is_ignored_path(path: Path, workspace: str) -> bool:
+        rel = path.relative_to(workspace)
+        return any(part in {".git", "node_modules"} for part in rel.parts)
+
+    @staticmethod
+    def _pass(name: str, message: str) -> TestResult:
+        return TestResult(test_name=name, status=ExecutionStatus.PASS, error_message=message)
+
+    @staticmethod
+    def _fail(name: str, message: str) -> TestResult:
+        return TestResult(test_name=name, status=ExecutionStatus.FAIL, error_message=message)

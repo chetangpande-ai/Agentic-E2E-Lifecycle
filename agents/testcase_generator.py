@@ -22,12 +22,16 @@ import time
 class TestCaseGeneratorAgent:
     """Agent that generates comprehensive test cases from requirements."""
 
+    TEXT_LIMIT = 2200
+    EDGE_CASE_LIMIT = 10
+
     def __init__(self):
         settings = get_settings()
         self.llm = ChatGroq(
             model=settings.groq_model,
             temperature=settings.groq_temperature,
             api_key=settings.groq_api_key,
+            max_tokens=1800,
         )
 
     def generate(
@@ -52,15 +56,17 @@ class TestCaseGeneratorAgent:
 
         feedback_context = ""
         if feedback:
-            feedback_context = f"**IMPORTANT - Human Feedback for Regeneration**:\n{feedback}\nPlease address this feedback in the generated test cases."
+            feedback_context = f"**IMPORTANT - Human Feedback for Regeneration**:\n{self._truncate(feedback, 900)}\nPlease address this feedback in the generated test cases."
+
+        edge_cases = analysis.edge_cases[: self.EDGE_CASE_LIMIT] if analysis.edge_cases else []
 
         user_prompt = TESTCASE_GENERATION_USER_PROMPT.format(
-            title=requirement.title,
-            description=requirement.description or "Not provided",
-            acceptance_criteria=requirement.acceptance_criteria or "Not provided",
-            analysis_summary=analysis.summary,
-            recommended_test_types=", ".join(analysis.recommended_test_types),
-            edge_cases="\n".join(f"- {ec}" for ec in analysis.edge_cases) if analysis.edge_cases else "None identified",
+            title=self._truncate(requirement.title, 300),
+            description=self._truncate(requirement.description or "Not provided", self.TEXT_LIMIT),
+            acceptance_criteria=self._truncate(requirement.acceptance_criteria or "Not provided", self.TEXT_LIMIT),
+            analysis_summary=self._truncate(analysis.summary, 1000),
+            recommended_test_types=self._truncate(", ".join(analysis.recommended_test_types), 500),
+            edge_cases="\n".join(f"- {self._truncate(ec, 250)}" for ec in edge_cases) if edge_cases else "None identified",
             feedback_context=feedback_context,
         )
 
@@ -139,3 +145,10 @@ class TestCaseGeneratorAgent:
                 "requirement_id": requirement.id,
             })
             raise
+
+    @staticmethod
+    def _truncate(value: str, limit: int) -> str:
+        text = str(value or "")
+        if len(text) <= limit:
+            return text
+        return text[:limit].rstrip() + "\n...[truncated]"

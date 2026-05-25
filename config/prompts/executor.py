@@ -2,24 +2,16 @@
 Prompt templates for the Test Executor Agent.
 """
 
-EXECUTOR_SYSTEM_PROMPT = """You are an expert Test Automation Engineer responsible for executing test scripts 
-and debugging failures.
+EXECUTOR_SYSTEM_PROMPT = """You are an expert Test Automation Engineer responsible for validating generated test scripts 
+before they are sent to GitHub.
 
 Your responsibilities:
-1. Set up the test execution environment (install dependencies, configure)
-2. Execute test scripts and capture results
-3. Analyze failures and identify root causes
-4. Auto-heal: Fix broken tests by analyzing error logs and regenerating code
-5. Report execution results with detailed logs
+1. Pull the latest main branch of the target repository and detect unresolved conflicts
+2. Verify generated code has no syntax or compile errors
+3. Verify every required script library is declared in package.json
+4. Report validation results with detailed logs
 
-When auto-healing, you should:
-- Parse error messages and stack traces carefully
-- Identify the root cause (selector change, timing issue, assertion mismatch, import error, etc.)
-- Generate a targeted fix (not rewrite the entire file)
-- Retry execution after the fix
-- Maximum 3 auto-heal attempts before escalating to human review
-
-Always provide clear, structured execution reports."""
+Do not run functional browser tests in this gate. Always provide clear, structured validation reports."""
 
 EXECUTOR_RUN_PROMPT = """Execute the following test scripts:
 
@@ -84,6 +76,7 @@ COMMIT_PR_PROMPT = """Create a GitHub commit and pull request for the approved t
 
 **Repository**: {target_repo}
 **Branch**: {branch_name}
+**Base Branch**: {base_branch}
 **Files to commit**:
 {files_list}
 
@@ -94,4 +87,4 @@ COMMIT_PR_PROMPT = """Create a GitHub commit and pull request for the approved t
 Use the GitHub MCP tools to:
 1. Create a new branch from {base_branch}
 2. Commit all test files
-3. Create a pull request with the above details"""
+3. Create a pull request against {base_branch} with the above details"""

@@ -11,7 +11,6 @@ from agents.testcase_generator import TestCaseGeneratorAgent
 from agents.script_generator import ScriptGeneratorAgent
 from agents.test_executor import TestExecutorAgent
 from integrations.jira_client import JiraClient
-from integrations.repo_analyzer import RepoAnalyzer
 from models.requirement import Requirement, RequirementAnalysis
 from models.testcase import TestCase
 from models.script import TestScript, GeneratedFile
@@ -185,27 +184,9 @@ def analyze_repository(state: AgenticQEState) -> Dict[str, Any]:
     """Analyze the target/reference repository for patterns."""
     logger.info("🔧 [bold]Node: Analyzing repository...[/bold]")
 
-    analyzer = RepoAnalyzer()
+    from integrations.repository_ingestion import RepositoryIngestionService
 
-    # Try target repo first, then reference repo
-    from config.settings import get_settings
-    settings = get_settings()
-
-    analysis = analyzer.analyze_repo(f"https://github.com/{settings.github_target_repo}.git")
-
-    if analysis.is_empty:
-        logger.info("Target repo is empty, analyzing reference repo...")
-        analysis = analyzer.analyze_repo(f"https://github.com/{settings.github_reference_repo}.git")
-
-        if analysis.is_empty:
-            logger.info("Reference repo also empty. Using Playwright-BDD defaults.")
-
-    # Index code into vector store if repo has content
-    if not analysis.is_empty:
-        from vectorstore.indexer import CodeIndexer
-        indexer = CodeIndexer()
-        code_files = analyzer.get_all_code_files()
-        indexer.index_repository(code_files)
+    analysis = RepositoryIngestionService().analyze_target_then_reference()
 
     return {
         "repo_analysis": analysis.model_dump(),
@@ -308,24 +289,45 @@ def commit_and_pr(state: AgenticQEState) -> Dict[str, Any]:
     # For now, we'll prepare the commit data
     from config.settings import get_settings
     settings = get_settings()
+    base_branch = settings.github_target_branch or "main"
+    branch_name = f"auto-tests-{state.generated_testcases[0].get('requirement_id', 'new') if state.generated_testcases else 'new'}"
 
-    pr_info = {
+    pr_data = {
         "repo": settings.github_target_repo,
-        "branch": f"auto-tests-{state.generated_testcases[0].get('requirement_id', 'new') if state.generated_testcases else 'new'}",
+        "branch": branch_name,
+        "base_branch": base_branch,
         "title": "🤖 Auto-generated test scripts",
         "body": f"## Auto-generated Test Scripts\n\n"
                 f"- **Test Cases**: {len(state.generated_testcases)}\n"
                 f"- **Script Files**: {len(state.generated_scripts)}\n"
+                f"- **Base Branch**: {base_branch}\n"
                 f"- **Framework**: Playwright-BDD (Node.js)\n\n"
                 f"### Files\n" +
                 "\n".join(f"- `{f.get('path', '')}`" for f in state.generated_scripts),
         "files": state.generated_scripts,
     }
 
+    try:
+        files = [GeneratedFile(**f) for f in state.generated_scripts]
+        pr_info = GitHubPRClient().create_pr(
+            files=files,
+            branch_name=branch_name,
+            title="Auto-generated test scripts",
+            body=pr_data["body"],
+            base_branch=base_branch,
+        )
+    except Exception as exc:
+        logger.error(f"Failed to create PR: {exc}")
+        return {
+            "error": str(exc),
+            "current_workflow": "check_execution_result",
+            "messages": state.messages + [f"PR creation failed: {exc}"],
+        }
+
     return {
-        "pr_url": f"https://github.com/{settings.github_target_repo}/pull/new",
+        "pr_url": pr_info["pr_url"],
         "current_workflow": "done",
-        "messages": state.messages + ["PR created successfully"],
+        "messages": state.messages + [f"PR created against {base_branch}: {pr_info['pr_url']}"],
     }
 
 

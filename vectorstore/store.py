@@ -45,6 +45,20 @@ def add_documents(
     logger.info(f"Added {len(documents)} documents to '{collection_name}'")
 
 
+def reset_collection(collection_name: str = "code_patterns") -> None:
+    """Delete and recreate a vector store collection."""
+    global _stores
+    store = _stores.pop(collection_name, None)
+    if store is not None:
+        try:
+            store.delete_collection()
+        except Exception as exc:
+            logger.warning(f"Could not delete existing collection '{collection_name}': {exc}")
+
+    get_vectorstore(collection_name)
+    logger.info(f"Reset ChromaDB collection: {collection_name}")
+
+
 def similarity_search(
     query: str,
     collection_name: str = "code_patterns",

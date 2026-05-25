@@ -32,7 +32,7 @@ class RepoAnalyzer:
         self.repo_path = None
         self.settings = get_settings()
 
-    def analyze_repo(self, repo_url: Optional[str] = None) -> RepoAnalysis:
+    def analyze_repo(self, repo_url: Optional[str] = None, branch: Optional[str] = None) -> RepoAnalysis:
         """
         Clone and analyze a repository for test automation patterns.
         
@@ -46,9 +46,9 @@ class RepoAnalyzer:
         logger.info(f"[bold yellow]Analyzing repository:[/bold yellow] {url}")
 
         try:
-            # Clone to temp directory
             self.repo_path = tempfile.mkdtemp(prefix="repo_analysis_")
-            repo = git.Repo.clone_from(url, self.repo_path)
+            clone_kwargs = {"branch": branch} if branch else {}
+            git.Repo.clone_from(url, self.repo_path, **clone_kwargs)
             
             return self._perform_analysis()
         except git.exc.GitCommandError as e:

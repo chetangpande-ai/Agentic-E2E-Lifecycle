@@ -116,6 +116,34 @@ def get_config() -> dict[str, Any]:
     }
 
 
+@app.get("/api/logs/latest")
+def latest_log() -> dict[str, Any]:
+    app_logs = [
+        path for path in (ROOT / "logs").glob("agentic_qe_*.log")
+        if path.is_file() and path.stat().st_size > 0
+    ]
+    log_files = app_logs or [
+        path for path in (ROOT / "logs").glob("*.log")
+        if path.is_file() and path.stat().st_size > 0
+    ]
+    if not log_files:
+        return {"name": "", "updated_at": "", "content": "", "truncated": False}
+
+    latest = max(log_files, key=lambda path: path.stat().st_mtime)
+    max_chars = 20000
+    content = latest.read_text(encoding="utf-8", errors="replace")
+    truncated = len(content) > max_chars
+    if truncated:
+        content = content[-max_chars:]
+
+    return {
+        "name": latest.name,
+        "updated_at": latest.stat().st_mtime,
+        "content": content,
+        "truncated": truncated,
+    }
+
+
 @app.get("/api/state")
 def get_state() -> dict[str, Any]:
     return _serialize_state()
@@ -289,12 +317,13 @@ def generate_scripts(payload: FeedbackRequest | None = None) -> dict[str, Any]:
     try:
         _reset_settings()
         from agents.script_generator import ScriptGeneratorAgent
+        from integrations.repository_ingestion import RepositoryIngestionService
         from models.testcase import TestCase
 
         feedback = payload.feedback if payload else ""
         agent = ScriptGeneratorAgent()
         test_cases = [TestCase(**testcase) for testcase in STATE["generated_testcases"]]
-        repo_analysis = agent.analyze_repository()
+        repo_analysis = RepositoryIngestionService().analyze_target_then_reference()
         script = agent.generate(test_cases=test_cases, repo_analysis=repo_analysis, feedback=feedback)
 
         STATE["generated_scripts"] = [file.model_dump() for file in script.files]
@@ -346,8 +375,47 @@ def run_execution() -> dict[str, Any]:
 
 @app.post("/api/commit-pr")
 def commit_pr() -> dict[str, Any]:
-    target_repo = os.environ.get("GITHUB_TARGET_REPO", "repo")
-    STATE["pr_url"] = f"https://github.com/{target_repo}/pull/1"
-    STATE["workflow_step"] = 5
-    _append_message("PR created")
-    return _serialize_state()
+    _require_config("GITHUB_PERSONAL_ACCESS_TOKEN", "GITHUB_TARGET_REPO")
+    latest_execution = STATE["execution_results"][-1] if STATE["execution_results"] else {}
+    if latest_execution.get("status") != "PASS":
+        raise HTTPException(status_code=400, detail="Cannot create PR until execution validation passes")
+
+    try:
+        _reset_settings()
+        from config.settings import get_settings
+        from integrations.github_pr import GitHubPRClient
+        from models.script import GeneratedFile
+
+        settings = get_settings()
+        base_branch = settings.github_target_branch or "main"
+        req_id = "new"
+        if STATE["generated_testcases"]:
+            req_id = STATE["generated_testcases"][0].get("requirement_id", "new")
+        branch_name = f"auto-tests-{req_id}"
+        files = [GeneratedFile(**file) for file in STATE["generated_scripts"]]
+        body = (
+            "## Auto-generated Test Scripts\n\n"
+            f"- **Test Cases**: {len(STATE['generated_testcases'])}\n"
+            f"- **Script Files**: {len(STATE['generated_scripts'])}\n"
+            f"- **Base Branch**: {base_branch}\n"
+            "- **Framework**: Playwright-BDD (Node.js)\n\n"
+            "### Files\n"
+            + "\n".join(f"- `{file.get('path', '')}`" for file in STATE["generated_scripts"])
+        )
+        pr_info = GitHubPRClient().create_pr(
+            files=files,
+            branch_name=branch_name,
+            title="Auto-generated test scripts",
+            body=body,
+            base_branch=base_branch,
+        )
+
+        STATE["pr_url"] = pr_info["pr_url"]
+        STATE["workflow_step"] = 5
+        _append_message(f"PR created: {pr_info['pr_url']}")
+        return _serialize_state()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _append_message(f"PR creation failed: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc

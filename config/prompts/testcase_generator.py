@@ -11,7 +11,7 @@ For each requirement, generate test cases covering:
 - **Boundary cases**: Edge values, limits, transitions
 - **Integration scenarios**: Cross-component interactions
 
-Generate 6 to 8 highest-value test cases unless the human feedback explicitly asks for more.
+Generate 4 to 5 highest-value test cases unless the human feedback explicitly asks for more.
 
 Each test case MUST include:
 1. Unique test case ID (TC_XXX format)
