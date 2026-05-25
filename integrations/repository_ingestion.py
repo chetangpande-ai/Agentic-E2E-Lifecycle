@@ -3,7 +3,9 @@ Main-branch repository ingestion and cached coding-agent analysis.
 """
 
 import json
+import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Dict
 
@@ -20,6 +22,7 @@ class RepositoryIngestionService:
     """Caches repo analysis by repo, branch, and latest main commit SHA."""
 
     COLLECTION_NAME = "code_patterns"
+    SCRIPT_FILE_EXTENSIONS = {".feature", ".ts", ".js", ".json"}
 
     def __init__(self):
         self.settings = get_settings()
@@ -36,6 +39,29 @@ class RepositoryIngestionService:
         if reference.is_empty:
             logger.info("Reference repo also empty. Using Playwright-BDD defaults.")
         return reference
+
+    def get_target_main_script_files(self) -> Dict[str, str]:
+        """Return existing automation script files from target repo main."""
+        repo_url = f"https://github.com/{self.settings.github_target_repo}.git"
+        sha = self._remote_branch_sha(repo_url)
+        if not sha:
+            return {}
+
+        workspace = tempfile.mkdtemp(prefix="repo_existing_scripts_")
+        try:
+            self._run(["git", "clone", "--branch", self.branch, repo_url, workspace])
+            files = {}
+            for path in Path(workspace).rglob("*"):
+                if not path.is_file() or self._is_ignored_path(path):
+                    continue
+                rel = path.relative_to(workspace).as_posix()
+                if self._is_script_file(path, rel):
+                    content = path.read_text(encoding="utf-8", errors="ignore")
+                    if content.strip():
+                        files[rel] = content
+            return files
+        finally:
+            shutil.rmtree(workspace, ignore_errors=True)
 
     def analyze_repo(self, repo: str) -> RepoAnalysis:
         repo_url = f"https://github.com/{repo}.git" if "/" in repo and not repo.startswith("http") else repo
@@ -88,6 +114,32 @@ class RepositoryIngestionService:
 
         parts = result.stdout.split()
         return parts[0] if len(parts) >= 2 else ""
+
+    def _run(self, command: list[str]) -> None:
+        executable = shutil.which(command[0])
+        if not executable:
+            raise RuntimeError(f"Required command not available: {command[0]}")
+        result = subprocess.run(
+            [executable, *command[1:]],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            shell=False,
+        )
+        if result.returncode != 0:
+            output = (result.stdout + "\n" + result.stderr).strip()
+            raise RuntimeError(f"Command failed: {' '.join(command)}\n{output[-2000:]}")
+
+    def _is_script_file(self, path: Path, rel: str) -> bool:
+        if path.name in {"package.json", "playwright.config.ts", "playwright.config.js", "tsconfig.json"}:
+            return True
+        if path.suffix.lower() not in self.SCRIPT_FILE_EXTENSIONS:
+            return False
+        return rel.startswith(("features/", "tests/", "pages/", "fixtures/", "helpers/", "utils/"))
+
+    @staticmethod
+    def _is_ignored_path(path: Path) -> bool:
+        return any(part in {".git", "node_modules", "__pycache__", ".venv", "venv"} for part in path.parts)
 
     def _load_cache(self) -> Dict:
         if not self.cache_path.exists():

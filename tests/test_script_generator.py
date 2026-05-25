@@ -31,6 +31,42 @@ def test_fallback_script_files_are_generated_from_test_cases():
     assert files[5].path == "tsconfig.json"
 
 
+def test_existing_main_script_helpers_infer_file_type_and_dependencies():
+    package_json = """
+    {
+      "devDependencies": {
+        "@playwright/test": "^1.0.0",
+        "typescript": "^5.0.0"
+      },
+      "dependencies": {
+        "playwright-bdd": "^8.0.0"
+      }
+    }
+    """
+
+    assert ScriptGeneratorAgent._infer_file_type("features/login.feature").value == "feature"
+    assert ScriptGeneratorAgent._infer_file_type("tests/login.steps.ts").value == "step_definition"
+    assert ScriptGeneratorAgent._infer_file_type("playwright.config.ts").value == "config"
+    assert ScriptGeneratorAgent._infer_file_type("tests/generated-test-data.json").value == "fixture"
+    assert ScriptGeneratorAgent._dependencies_from_package(package_json) == [
+        "playwright-bdd",
+        "@playwright/test",
+        "typescript",
+    ]
+
+
+def test_ensure_project_config_adds_missing_tsconfig_for_typescript_files():
+    files = [
+        ScriptGeneratorAgent._build_fallback_files([])[1],
+    ]
+
+    ScriptGeneratorAgent._ensure_project_config(files, ["@playwright/test", "typescript"])
+
+    paths = [file.path for file in files]
+    assert "package.json" in paths
+    assert "tsconfig.json" in paths
+
+
 def test_script_generator_compacts_large_prompt_context():
     agent = object.__new__(ScriptGeneratorAgent)
     test_case = TestCase(

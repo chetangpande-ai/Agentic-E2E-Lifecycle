@@ -11,6 +11,7 @@ from agents.testcase_generator import TestCaseGeneratorAgent
 from agents.script_generator import ScriptGeneratorAgent
 from agents.test_executor import TestExecutorAgent
 from integrations.jira_client import JiraClient
+from integrations.github_pr import GitHubPRClient
 from models.requirement import Requirement, RequirementAnalysis
 from models.testcase import TestCase
 from models.script import TestScript, GeneratedFile
@@ -200,10 +201,40 @@ def generate_scripts(state: AgenticQEState) -> Dict[str, Any]:
     logger.info("💻 [bold]Node: Generating test scripts...[/bold]")
 
     from models.script import RepoAnalysis
+    from integrations.repository_ingestion import RepositoryIngestionService
 
     agent = ScriptGeneratorAgent()
     test_cases = [TestCase(**tc) for tc in state.generated_testcases]
     repo_analysis = RepoAnalysis(**state.repo_analysis) if state.repo_analysis else None
+
+    if not state.script_feedback:
+        existing_files = RepositoryIngestionService().get_target_main_script_files()
+        if existing_files:
+            files = [
+                GeneratedFile(
+                    path=path,
+                    content=content,
+                    file_type=ScriptGeneratorAgent._infer_file_type(path),
+                )
+                for path, content in sorted(existing_files.items())
+            ]
+            script = TestScript(
+                id=f"SCRIPT_{test_cases[0].requirement_id}" if test_cases else "SCRIPT_EXISTING",
+                testcase_ids=[tc.id for tc in test_cases],
+                files=files,
+                dependencies=ScriptGeneratorAgent._dependencies_from_package(existing_files.get("package.json", "")),
+                setup_commands=["npm install"],
+                framework=(repo_analysis.framework if repo_analysis else "") or "playwright-bdd",
+                language=(repo_analysis.language if repo_analysis else "") or "typescript",
+            )
+            return {
+                "generated_scripts": [f.model_dump() for f in script.files],
+                "script_dependencies": script.dependencies,
+                "script_setup_commands": script.setup_commands,
+                "current_workflow": "hitl_script_review",
+                "script_hitl_status": "pending",
+                "messages": state.messages + [f"Loaded {len(script.files)} existing script files from main"],
+            }
 
     script = agent.generate(
         test_cases=test_cases,

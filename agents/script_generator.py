@@ -265,6 +265,37 @@ export default defineConfig({
             ))
 
     @staticmethod
+    def _infer_file_type(path: str) -> FileType:
+        normalized = path.replace("\\", "/").lower()
+        if normalized.endswith(".feature"):
+            return FileType.FEATURE
+        if normalized.endswith(".steps.ts") or "step" in normalized:
+            return FileType.STEP_DEFINITION
+        if "page" in normalized and normalized.endswith((".ts", ".js")):
+            return FileType.PAGE_OBJECT
+        if normalized.endswith(".json") and "package.json" not in normalized and "tsconfig.json" not in normalized:
+            return FileType.FIXTURE
+        if normalized.endswith((".config.ts", ".config.js")) or normalized in {"package.json", "tsconfig.json"}:
+            return FileType.CONFIG
+        return FileType.HELPER
+
+    @staticmethod
+    def _dependencies_from_package(package_content: str) -> List[str]:
+        if not package_content:
+            return ["@playwright/test", "playwright-bdd", "typescript"]
+        try:
+            package_json = json.loads(package_content)
+        except json.JSONDecodeError:
+            return ["@playwright/test", "playwright-bdd", "typescript"]
+
+        dependencies = []
+        for section in ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies"):
+            values = package_json.get(section, {})
+            if isinstance(values, dict):
+                dependencies.extend(values.keys())
+        return dependencies or ["@playwright/test", "playwright-bdd", "typescript"]
+
+    @staticmethod
     def _package_json(dependencies: List[str]) -> str:
         package_names = []
         for dependency in dependencies:

@@ -323,7 +323,36 @@ def generate_scripts(payload: FeedbackRequest | None = None) -> dict[str, Any]:
         feedback = payload.feedback if payload else ""
         agent = ScriptGeneratorAgent()
         test_cases = [TestCase(**testcase) for testcase in STATE["generated_testcases"]]
-        repo_analysis = RepositoryIngestionService().analyze_target_then_reference()
+        ingestion = RepositoryIngestionService()
+        repo_analysis = ingestion.analyze_target_then_reference()
+        if not feedback:
+            existing_files = ingestion.get_target_main_script_files()
+            if existing_files:
+                from models.script import GeneratedFile, TestScript
+
+                files = [
+                    GeneratedFile(
+                        path=path,
+                        content=content,
+                        file_type=ScriptGeneratorAgent._infer_file_type(path),
+                    )
+                    for path, content in sorted(existing_files.items())
+                ]
+                script = TestScript(
+                    id=f"SCRIPT_{test_cases[0].requirement_id}" if test_cases else "SCRIPT_EXISTING",
+                    testcase_ids=[test_case.id for test_case in test_cases],
+                    files=files,
+                    dependencies=ScriptGeneratorAgent._dependencies_from_package(existing_files.get("package.json", "")),
+                    setup_commands=["npm install"],
+                    framework=repo_analysis.framework or "playwright-bdd",
+                    language=repo_analysis.language or "typescript",
+                )
+                STATE["generated_scripts"] = [file.model_dump() for file in script.files]
+                STATE["script_dependencies"] = script.dependencies
+                STATE["script_setup_commands"] = script.setup_commands
+                _append_message(f"Loaded {len(script.files)} existing script files from main")
+                return _serialize_state()
+
         script = agent.generate(test_cases=test_cases, repo_analysis=repo_analysis, feedback=feedback)
 
         STATE["generated_scripts"] = [file.model_dump() for file in script.files]
